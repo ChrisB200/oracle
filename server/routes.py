@@ -1,10 +1,15 @@
+import json
+import logging
+
 from flask import Blueprint, jsonify, request
 
-from bot.client import client, send_dm
+from bot.client import client, send_dm, send_plex_embed
 from services.redis import redis
 from services.torrent import get_torrent_by_hash
 
 routes = Blueprint("routes", __name__)
+
+logger = logging.getLogger(__name__)
 
 
 @routes.post("/torrent/completed")
@@ -36,3 +41,26 @@ def completed_torrent():
 
     client.loop.create_task(send_dm(user_id, message))
     return jsonify("success"), 200
+
+
+@routes.post("/plex/webhooks")
+def plex_webhooks():
+    body = request.form
+    if "payload" not in body:
+        logger.error("No payload field found!")
+        return jsonify({"error": "no payload"}), 400
+
+    # Parse the JSON hidden inside the form
+    payload = json.loads(body["payload"])
+
+    event = payload.get("event")
+    account = payload.get("Account")
+    server = payload.get("Server")
+    metadata = payload.get("Metadata")
+
+    # Debug
+    print("Plex payload parsed:", payload)
+
+    # Now schedule the embed task
+    client.loop.create_task(send_plex_embed(event, account, server, metadata))
+    return jsonify({"status": "ok"}), 200
