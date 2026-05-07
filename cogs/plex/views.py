@@ -3,7 +3,7 @@ import discord
 
 class PaginatorView(discord.ui.View):
     def __init__(self, ctx, pages):
-        super().__init__(timeout=60)  # auto-disable after 60s of inactivity
+        super().__init__(timeout=60)
         self.ctx = ctx
         self.pages = pages
         self.current_page = 0

@@ -7,12 +7,12 @@ LOG_DIR = BASE_DIR / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def setup_logger(name: str, log_file: str, level=logging.INFO):
-    logger = logging.getLogger(name)
-    logger.setLevel(level)
+def setup_logger(log_file: str, level=logging.INFO):
+    root = logging.getLogger()
+    root.setLevel(level)
 
-    if logger.handlers:
-        return logger  # prevent duplicate handlers
+    if root.handlers:
+        return
 
     formatter = logging.Formatter(
         "%(asctime)s | %(name)s | %(levelname)s | %(message)s"
@@ -26,7 +26,5 @@ def setup_logger(name: str, log_file: str, level=logging.INFO):
     stream_handler = logging.StreamHandler()
     stream_handler.setFormatter(formatter)
 
-    logger.addHandler(file_handler)
-    logger.addHandler(stream_handler)
-
-    return logger
+    root.addHandler(file_handler)
+    root.addHandler(stream_handler)

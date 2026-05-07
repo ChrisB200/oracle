@@ -1,10 +1,13 @@
 import logging
 
-from discord.ext.commands import (ExtensionAlreadyLoaded, ExtensionFailed,
-                                  ExtensionNotFound, NoEntryPointError)
+from discord.ext.commands import (
+    ExtensionAlreadyLoaded,
+    ExtensionFailed,
+    ExtensionNotFound,
+    NoEntryPointError,
+)
 
-from .guards import requires_discord
-from .state import client
+from client import client
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +23,6 @@ class ExtensionResult:
     FAILED = "failed"
 
 
-@requires_discord
 async def load_extension(ext: str) -> str:
     try:
         await client.load_extension(ext)
@@ -44,7 +46,6 @@ async def load_extension(ext: str) -> str:
         return ExtensionResult.FAILED
 
 
-@requires_discord
 async def unload_extension(ext: str) -> str:
     try:
         await client.unload_extension(ext)
@@ -60,7 +61,6 @@ async def unload_extension(ext: str) -> str:
         return ExtensionResult.FAILED
 
 
-@requires_discord
 async def reload_extension(ext: str) -> str:
     unload_result = await unload_extension(ext)
 

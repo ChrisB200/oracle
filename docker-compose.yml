@@ -1,11 +1,20 @@
 services:
-  discord-bot:
+  oracle:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: discord-bot
+    container_name: oracle
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      ACCESS_TOKEN: ${ACCESS_TOKEN}
+      ALFRED_URL: ${ALFRED_URL}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      FLASK_HOST: ${FLASK_HOST:-0.0.0.0}
+      FLASK_PORT: ${FLASK_PORT:-9001}
     ports:
-      - "9000:80"
+      - "${FLASK_PORT:-9001}:${FLASK_PORT:-9001}"
+    volumes:
+      - ./data:/app/data
+    command: ["python", "main.py"]

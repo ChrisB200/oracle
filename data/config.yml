@@ -1,0 +1,6 @@
+channels:
+  commands: 1422222706220335237
+  downloads: 1422222706220335237
+notifications:
+  discord: true
+  dm_on_complete: true

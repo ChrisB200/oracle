@@ -1,64 +1,50 @@
 import logging
 import math
 import re
-import shutil
 
 import discord
 from discord.ext import commands
 
-from services.redis import redis
-from services.torrent import add_magnet_link, get_magnet_hash, get_progress
+from config.settings import SETTINGS, get_setting, set_setting
+from services.alfred import (
+    download_media,
+    get_magnet_hash,
+    get_progress,
+    get_storage,
+    search_library,
+)
 
-from .scrape import Knaben, NyaaScraper
 from .views import PaginatorView
 
 logger = logging.getLogger(__name__)
 
 
-def pretty_size(num_bytes: int) -> str:
-    for unit in ["B", "KB", "MB", "GB", "TB", "PB"]:
-        if num_bytes < 1024:
-            return f"{num_bytes:.2f} {unit}"
-        num_bytes /= 1024
-    return f"{num_bytes:.2f} PB"
-
-
 class Plex(commands.Cog):
     def __init__(self, client):
         self.client = client
-        self.anime = NyaaScraper()
-        self.knaben = Knaben()
         self.last_results = {}
 
     @commands.group(invoke_without_command=True)
-    async def plex(self, ctx):
+    async def plex(self, ctx, media_type=None, *, query=""):
         """Scrape and download media for Plex."""
-        await ctx.invoke(ctx.bot.get_command("help"), "plex")
+        if media_type is None:
+            return await ctx.invoke(ctx.bot.get_command("help"), "plex")
+
+        await self._search(ctx, media_type, query)
 
     @plex.command()
     async def storage(self, ctx):
         """Shows the storage information on the plex server"""
-        path = "/mnt/ssd"
         try:
-            stats = shutil.disk_usage(path)
-        except FileNotFoundError:
-            return await ctx.send(f"❌ Path not found: `{path}`")
+            stats = get_storage()
+        except Exception:
+            logger.exception("Failed to fetch storage from Alfred")
+            return await ctx.send("Could not fetch storage from Alfred")
 
-        embed = discord.Embed(
-            title=f"📊 Storage Info for `{path}`",
-            color=discord.Color.blurple()
-        )
-
-        embed.add_field(name="Total", value=pretty_size(
-            stats.total), inline=True)
-        embed.add_field(name="Used", value=pretty_size(
-            stats.used), inline=True)
-        embed.add_field(name="Free", value=pretty_size(
-            stats.free), inline=True)
-
-        percent_used = (stats.used / stats.total * 100) if stats.total else 0
-        embed.add_field(
-            name="Used %", value=f"{percent_used:.1f}%", inline=True)
+        embed = discord.Embed(title="📊 Storage Info", color=discord.Color.blurple())
+        embed.add_field(name="Total", value=stats.get("total", "?"), inline=True)
+        embed.add_field(name="Used", value=stats.get("used", "?"), inline=True)
+        embed.add_field(name="Free", value=stats.get("free", "?"), inline=True)
 
         await ctx.send(embed=embed)
 
@@ -83,31 +69,26 @@ class Plex(commands.Cog):
 
         await ctx.send(embed=embed)
 
-    async def _scrape(self, ctx, media_type: str, series: str):
-        if media_type == "anime":
-            rows = self.anime.scrape_nyaa(series)
-            logger.info(
-                "Scraping anime from nyaa for %s by user %s", series, ctx.author.name
+    async def _search(self, ctx, media_type: str, series: str):
+        commands = get_setting("channels", "commands")
+        if commands and int(commands) != ctx.channel.id:
+            channel = self.client.get_channel(commands)
+            return await ctx.send(
+                f"Please use commands in {channel.mention}",
+                delete_after=5,
             )
-        elif media_type == "anime-movies":
-            rows = self.anime.scrape_nyaa(series)
+
+        try:
+            rows = search_library(media_type, series)
             logger.info(
-                "Scraping anime movies from nyaa for %s by user %s",
+                "Searching %s in Alfred for %s by user %s",
+                media_type,
                 series,
                 ctx.author.name,
             )
-        elif media_type == "tv-shows":
-            rows = self.knaben.search(series)
-            logger.info(
-                "Scraping tv from knaben for %s by user %s", series, ctx.author.name
-            )
-        elif media_type == "movies":
-            rows = self.knaben.search(series)
-            logger.info(
-                "Scraping movies from knaben for %s by user %s", series, ctx.author.name
-            )
-        else:
-            return await ctx.send("An error occurred with media type")
+        except Exception:
+            logger.exception("Failed to search for %s", media_type)
+            return await ctx.send("Search failed")
 
         if not rows or rows == []:
             await ctx.send(f"No results found for `{series}`.")
@@ -117,12 +98,11 @@ class Plex(commands.Cog):
         pages = []
 
         for i in range(0, len(rows), chunk_size):
-            chunk = rows[i: i + chunk_size]
+            chunk = rows[i : i + chunk_size]
             description_lines = []
 
             for j, row in enumerate(chunk, start=i + 1):
-                pretty_name = re.sub(r"(1080p|720p|2160p)",
-                                     r"**\1**", row["name"])
+                pretty_name = re.sub(r"(1080p|720p|2160p)", r"**\1**", row["name"])
                 description_lines.append(
                     f"**{j}.** 🎞️ {pretty_name}\n"
                     f"  💾 `{row['size']}` | 🌱 `{row['seeders']}` seeders"
@@ -146,30 +126,14 @@ class Plex(commands.Cog):
         view = PaginatorView(ctx, pages)
         view.message = await ctx.send(embed=pages[0], view=view)
 
-    @plex.command(aliases=["a"])
-    async def anime(self, ctx, *, series: str):
-        """Search for anime"""
-        await self._scrape(ctx, "anime", series)
-
-    @plex.command(aliases=["am", "anime-movie", "anime-movies"])
-    async def anime_movies(self, ctx, *, series: str):
-        """Search for anime movies"""
-        await self._scrape(ctx, "anime-movies", series)
-
-    @plex.command(aliases=["show", "tv-shows", "shows"])
-    async def tv(self, ctx, *, series: str):
-        """Search for tv shows"""
-        await self._scrape(ctx, "tv-shows", series)
-
-    @plex.command(aliases=["film", "films", "movie"])
-    async def movies(self, ctx, *, series: str):
-        """Search for movies"""
-        await self._scrape(ctx, "movies", series)
-
     @plex.command()
     async def download(self, ctx, *, id):
         """Download a result by its number from the last search"""
-        last_results = self.last_results.get(ctx.author.id)["rows"]
+        user_search = self.last_results.get(ctx.author.id)
+        if not user_search:
+            return await ctx.send("Must search for a show, movie or anime first")
+
+        last_results = user_search["rows"]
         if not last_results:
             return await ctx.send("Must search for a show, movie or anime first")
 
@@ -181,12 +145,10 @@ class Plex(commands.Cog):
 
             result = last_results[id]
             magnet = result.get("magnet")
-            user = self.last_results.get(ctx.author.id)
-            hash = get_magnet_hash(magnet)
-            media_type = user.get("type")
+            media_type = user_search.get("type")
+            user_id = ctx.author.id
 
-            add_magnet_link(magnet, media_type)
-            redis.set(hash, ctx.author.id)
+            download_media(media_type, magnet, user_id, "discord")
         except Exception:
             logger.exception("An error occurred trying to download")
             return await ctx.send("An error has occurred")
@@ -198,7 +160,12 @@ class Plex(commands.Cog):
     @plex.command()
     async def progress(self, ctx):
         """Get the progress of all media currently downloading"""
-        torrents = get_progress()
+        try:
+            torrents = get_progress()
+        except Exception:
+            logger.exception("Failed to fetch progress from Alfred")
+            return await ctx.send("Could not fetch progress from Alfred")
+
         if not torrents:
             return await ctx.send("Nothing is currently downloading")
 
@@ -213,6 +180,26 @@ class Plex(commands.Cog):
         )
 
         await ctx.send(embed=embed)
+
+    @plex.command()
+    async def set_downloads(self, ctx, channel: discord.TextChannel):
+        set_setting(
+            channel.id,
+            "channels",
+            "downloads",
+        )
+
+        await ctx.send(f"Downloads channel set to {channel.mention}")
+
+    @plex.command()
+    async def set_commands(self, ctx, channel: discord.TextChannel):
+        set_setting(
+            channel.id,
+            "channels",
+            "commands",
+        )
+
+        await ctx.send(f"Downloads channel set to {channel.mention}")
 
 
 async def setup(client):

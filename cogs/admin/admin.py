@@ -2,8 +2,12 @@ import logging
 
 from discord.ext import commands
 
-from services.discord import (ExtensionResult, load_extension,
-                              reload_extension, unload_extension)
+from services.extensions import (
+    ExtensionResult,
+    load_extension,
+    reload_extension,
+    unload_extension,
+)
 
 logger = logging.getLogger(__name__)
 
